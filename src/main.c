@@ -1,4 +1,14 @@
-#include <vterm.h>
+/*
+
+    Copyright (C) 2025-2026 Nico Rajala.
+
+    This is a basic lightweight terminal emulator made for learning purposes.
+    It uses libvterm, xft, freetype2 and libX11.
+
+*/
+
+#include "win.h"
+
 #include <termios.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -7,8 +17,8 @@
 #include <string.h>
 #include <fcntl.h>
 #include <sys/select.h>
+#include <sys/ioctl.h>
 
-#include "win.h"
 #include "input.h"
 #include "config.h"
 
@@ -20,6 +30,12 @@ Colormap colormap;
 Window win;
 
 Wnd window;
+
+ScrollbackLine scrollback[SCROLLBACK_LINES];
+int sb_count = 0;
+int sb_offset = 0;
+
+static VTermScreenCell display[MAX_ROWS][MAX_COLS];
 
 XftColor color_cache[MAX_COLORS];
 bool color_cached[MAX_COLORS] = {false};
@@ -56,6 +72,13 @@ XftColor xft_color_from_vterm(Display *dpy, Visual *visual, Colormap colormap, V
     }
     color_cached[idx] = true;
     return color_cache[idx];
+}
+
+XftColor resolve_color(Display *dpy, Visual *visual, Colormap colormap,
+                       VTermColor *c, XftColor *fallback) {
+    if (VTERM_COLOR_IS_DEFAULT_FG(c) || VTERM_COLOR_IS_DEFAULT_BG(c))
+        return *fallback;
+    return xft_color_from_vterm(dpy, visual, colormap, c);
 }
 
 int main() {
@@ -113,7 +136,13 @@ int main() {
     setenv("COLORTERM", "truecolor", 1);
 
     int masterFd;
-    pid_t pid = forkpty(&masterFd, NULL, NULL, NULL);
+    struct winsize ws = {
+        .ws_row = window.rows,
+        .ws_col = window.cols,
+        .ws_xpixel = window.width,
+        .ws_ypixel = window.height,
+    };
+    pid_t pid = forkpty(&masterFd, NULL, NULL, &ws);
     if (pid == 0) {
         char *shell = getenv("SHELL");
         if (!shell) shell = "/bin/bash";
@@ -129,12 +158,18 @@ int main() {
     VTermScreen *vtermScreen = vterm_obtain_screen(vt);
     vterm_screen_reset(vtermScreen, 1);
 
+    VTermScreenCallbacks sb_callbacks = {
+        .sb_pushline = sb_pushline,
+        .sb_popline  = sb_popline,
+    };
+    vterm_screen_set_callbacks(vtermScreen, &sb_callbacks, NULL);
+
     VTermState *vtermState = vterm_obtain_state(vt);
     vterm_state_set_bold_highbright(vtermState, 1);
 
     VTermColor default_fg, default_bg;
     vterm_state_get_default_colors(vtermState, &default_fg, &default_bg);
-    
+
     vterm_screen_enable_altscreen(vtermScreen, 1);
     
     char buf[1024];
@@ -167,6 +202,8 @@ int main() {
     };
     XftColorAllocValue(dpy, visual, colormap, &cursorColor, &xftCursor);
 
+    bool need_redraw = false;
+
     while (1) {
         fd_set fds;
         FD_ZERO(&fds);
@@ -176,14 +213,14 @@ int main() {
         int maxfd = (masterFd > ConnectionNumber(dpy)) ? masterFd : ConnectionNumber(dpy);
         if (select(maxfd + 1, &fds, NULL, NULL, NULL) < 0) break;
 
-        bool need_redraw = false;
-
         // Shell output
         if (FD_ISSET(masterFd, &fds)) {
             int len = read(masterFd, buf, sizeof(buf));
             if (len > 0) {
                 vterm_input_write(vt, buf, len);
                 vterm_screen_flush_damage(vtermScreen);
+                need_redraw = true;
+                sb_offset = 0;
             } else if (len == 0) {
                 break;
             } else {
@@ -191,6 +228,7 @@ int main() {
                 break;
             }
         }
+
 
         // Keypress input
         if (FD_ISSET(ConnectionNumber(dpy), &fds)) {
@@ -213,43 +251,76 @@ int main() {
                         window.rows = new_rows;
                         vterm_set_size(vt, window.rows, window.cols);
                         XftDrawChange(draw, win);
+
+                        struct winsize ws = {
+                            .ws_row = window.rows,
+                            .ws_col = window.cols,
+                            .ws_xpixel = window.width,
+                            .ws_ypixel = window.height,
+                        };
+                        ioctl(masterFd, TIOCSWINSZ, &ws);
+
+                        XftDrawChange(draw, win);
+                        need_redraw = true;
                     }
+
                 }
             }
         }
 
-        XftDrawRect(draw, &xft_bg, 0, 0, window.width, window.height);
-        VTermScreenCell cell;
+        if (!need_redraw) continue;
+
         VTermPos pos;
 
-        // Render loop
         for (int row = 0; row < window.rows; row++) {
+            int sb_idx = sb_count - sb_offset + row;
+
+            if (sb_idx >= 0 && sb_idx < sb_count) {
+                memcpy(display[row], scrollback[sb_idx].cells,
+                    sizeof(VTermScreenCell) * MIN(scrollback[sb_idx].cols, window.cols));
+                if (scrollback[sb_idx].cols < window.cols)
+                    memset(&display[row][scrollback[sb_idx].cols], 0,
+                        sizeof(VTermScreenCell) * (window.cols - scrollback[sb_idx].cols));
+            } else {
+                int live_row = row - sb_offset;
+                if (live_row < 0 || live_row >= window.rows) {
+                    memset(display[row], 0, sizeof(VTermScreenCell) * window.cols);
+                } else {
+                    VTermPos p = { .row = live_row, .col = 0 };
+                    for (int col = 0; col < window.cols; col++) {
+                        p.col = col;
+                        vterm_screen_get_cell(vtermScreen, p, &display[row][col]);
+                    }
+                }
+            }
+
             for (int col = 0; col < window.cols; col++) {
-                pos.row = row;
-                pos.col = col;
-                if (!vterm_screen_get_cell(vtermScreen, pos, &cell)) continue;
-                if (cell.chars[0] == 0) continue;
+                VTermScreenCell cell = display[row][col];
+
+                bool fg_is_default = VTERM_COLOR_IS_DEFAULT_FG(&cell.fg);
+                bool bg_is_default = VTERM_COLOR_IS_DEFAULT_BG(&cell.bg);
 
                 vterm_state_convert_color_to_rgb(vtermState, &cell.fg);
                 vterm_state_convert_color_to_rgb(vtermState, &cell.bg);
 
-                XftColor xft_fg_cell = xft_color_from_vterm(dpy, visual, colormap, &cell.fg);
-                XftColor xft_bg_cell = xft_color_from_vterm(dpy, visual, colormap, &cell.bg);
+                XftColor xft_fg_cell = fg_is_default ? xft_fg : xft_color_from_vterm(dpy, visual, colormap, &cell.fg);
+                XftColor xft_bg_cell = bg_is_default ? xft_bg : xft_color_from_vterm(dpy, visual, colormap, &cell.bg);
 
                 XftDrawRect(draw, &xft_bg_cell,
                     col * window.char_width,
                     row * window.char_height,
-                    window.char_width,
-                    window.char_height);
+                    window.char_width, window.char_height);
 
-                XftDrawStringUtf8(draw, &xft_fg_cell, xftFont,
-                    col * window.char_width,
-                    (row + 1) * window.char_height - window.char_height / 2 + 8,
-                    (FcChar8*)cell.chars,
-                    strlen((char*)cell.chars));
+                if (cell.chars[0] != 0) {
+                    XftDrawStringUtf8(draw, &xft_fg_cell, xftFont,
+                        col * window.char_width,
+                        (row + 1) * window.char_height - window.char_height / 2 + 8,
+                        (FcChar8*)cell.chars,
+                        strlen((char*)cell.chars));
+                }
 
-                XftColorFree(dpy, visual, colormap, &xft_fg_cell);
-                XftColorFree(dpy, visual, colormap, &xft_bg_cell);
+                if (!fg_is_default) XftColorFree(dpy, visual, colormap, &xft_fg_cell);
+                if (!bg_is_default) XftColorFree(dpy, visual, colormap, &xft_bg_cell);
             }
         }
 

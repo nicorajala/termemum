@@ -3,6 +3,7 @@
 #define _INPUT_H
 
 #include <X11/keysym.h>
+#include <wchar.h>
 #include <vterm.h>
 #include <unistd.h>
 #include "win.h"

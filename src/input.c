@@ -16,8 +16,14 @@ void handle_keypress(XKeyEvent *xKey, VTerm *vt, int masterFd) {
     switch(keysym) {
         case XK_Left:       vKey = VTERM_KEY_LEFT; break;
         case XK_Right:      vKey = VTERM_KEY_RIGHT; break;
-        case XK_Up:         vKey = VTERM_KEY_UP; break;
-        case XK_Down:       vKey = VTERM_KEY_DOWN; break;
+        case XK_Up:
+            if(xKey->state & ShiftMask) { sb_offset++; return; }
+            vKey = VTERM_KEY_UP;
+            break;
+        case XK_Down:
+            if(xKey->state & ShiftMask) { sb_offset = MAX(0, sb_offset-1); return; }
+            vKey = VTERM_KEY_DOWN;
+            break;
         case XK_Page_Up:    vKey = VTERM_KEY_PAGEUP; break;
         case XK_Page_Down:  vKey = VTERM_KEY_PAGEDOWN; break;
     }

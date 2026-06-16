@@ -4,7 +4,7 @@
 #include "win.h"
 /*
 
-        COPYRIGHT (C) 2025 Nico Rajala
+        COPYRIGHT (C) 2025-2026 Nico Rajala
 
         THIS IS THE CONFIG FILE FOR TERMEMUM
 
@@ -24,10 +24,10 @@ static int font_size = 16;
 
 // Background color (Use hex color codes eg. #FFFF for white)
 static Color bg_color = {
-    .red = 0x0000,
-    .green = 0x0000,
-    .blue = 0x0000,
-    .alpha = 0xFFFF,
+    .red = 0x1111,
+    .green = 0x1111,
+    .blue = 0x1111,
+    .alpha = 0xDDDD,
 };
 
 // Default foreground color (Use hex color codes eg. #FFFF for white)
@@ -53,6 +53,7 @@ static Color cursor_color = {
 
         Ctrl + PageUp       Zoom in
         Ctrl + PageDown     Zoom out
+        Shift + Arrow Keys  Scroll up/down
 
 */
 
