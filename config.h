@@ -27,7 +27,7 @@ static Color bg_color = {
     .red = 0x1111,
     .green = 0x1111,
     .blue = 0x1111,
-    .alpha = 0xDDDD,
+    .alpha = 0xEDED,
 };
 
 // Default foreground color (Use hex color codes eg. #FFFF for white)

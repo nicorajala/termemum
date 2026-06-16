@@ -12,4 +12,3 @@ Make, GCC, VTerm, Xft, freetype 2, libX11
 
 ## Upcoming features
 - Mouse support
-- Scroll support
