@@ -1,5 +1,5 @@
 # Termemum
-<img src="docs/screenshots/ls-a.png" width=50%>
+<img src="docs/screenshots/1.png" width=50%>
 Termemum is a simple lightweight terminal emulator written in C for X11. It also works on most Wayland DEs/WMs
 
 ## Prerequisites for building source
@@ -9,6 +9,8 @@ Make, GCC, VTerm, Xft, freetype 2, libX11
 1. Clone this repository
 2. Install prerequisites listed above
 3. run ``` make install ```
+
+<img src="docs/screenshots/nvim.png" width=50%>
 
 ## Upcoming features
 - Mouse support
